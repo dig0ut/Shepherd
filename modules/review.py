@@ -61,7 +61,6 @@ class DomainReview(object):
             self.request_delay = settings.DOMAINCHECK_CONFIG['sleep_time']
         except Exception as error:
             self.request_delay = 20
-        
         try:
             self.virustotal_api_key = settings.DOMAINCHECK_CONFIG['virustotal_api_key']
         except Exception as error:
@@ -93,16 +92,26 @@ class DomainReview(object):
     def check_talos(self, domain):
         """Check the provided domain's category as determined by Cisco Talos."""
         categories = []
-        cisco_talos_uri = 'https://talosintelligence.com/sb_api/query_lookup?query=%2Fapi%2Fv2%2Fdetails%2Fdomain%2F&query_entry={}&offset=0&order=ip+asc'
+        cisco_talos_uri = 'https://www.talosintelligence.com/cloud_intel/url_reputation?'
+        PARAMS = {'url':domain}
+        #cisco_talos_uri = 'https://talosintelligence.com/sb_api/query_lookup?query=%2Fapi%2Fv2%2Fdetails%2Fdomain%2F&query_entry={}&offset=0&order=ip+asc'
         headers = {'User-Agent': self.useragent, 
                    'Referer': 'https://www.talosintelligence.com/reputation_center/lookup?search=' + domain}
         try:
-            req = self.session.get(cisco_talos_uri.format(domain), headers=headers)
+            req = self.session.get(cisco_talos_uri.format(domain), params = PARAMS, headers=headers)
+            #r = requests.get(url = URL, params = PARAMS)
+            #print(req)
             if req.ok:
                 json_data = req.json()
-                category = json_data['category']
+                #print(json_data)
+                category = json_data['reputation']
                 if category:
-                    categories.append(json_data['category']['description'])
+                    try:
+                        categories.append(json_data['reputation']['aup_cat'][0]['desc_short'][0]['text'])
+                    #print(json_data['reputation']['aup_cat'][0]['desc_short'][0]['text'])
+                    #print("End.\n")
+                    except IndexError:
+                        categories.append('Uncategorized')  
                 else:
                     categories.append('Uncategorized')
             else:
@@ -139,7 +148,7 @@ class DomainReview(object):
             else:
                 print('[!] IBM X-Force check request failed. X-Force did not return a 200 response.')
                 print('L.. Request returned status "{}"'.format(req.status_code))
-        except:
+        except Exception as error:
             print('[!] IBM X-Force request failed: {}'.format(error))
         return categories
 
@@ -170,139 +179,28 @@ class DomainReview(object):
             print('[!] Fortiguard request failed: {}'.format(error))
         return categories
 
-    def check_bluecoat(self, domain, ocr=True):
-        """Check the provided domain's category as determined by Symantec Bluecoat."""
+    def check_barracuda(self, domain):
+        """Check the provided domain's category as determined by BarracudaCentral."""
+        #https://www.barracudacentral.org/lookups/lookup-reputation?lookup_entry=cdn-emea.com&submit=Check+Reputation
         categories = []
-        bluecoart_uri = 'https://sitereview.bluecoat.com/resource/lookup'
-        post_data = {'url': domain, 'captcha': ''}
-        headers = {'User-Agent': self.useragent, 
-                   'Content-Type': 'application/json; charset=UTF-8', 
-                   'Referer': 'https://sitereview.bluecoat.com/lookup'}
-        try:
-            response = self.session.post(bluecoart_uri, headers=headers, json=post_data, verify=False)
-            root = etree.fromstring(response.text)
-            for node in root.xpath('//CategorizationResult//categorization//categorization//name'):
-                categories.append(node.text)
-            if 'captcha' in categories:
-                if ocr:
-                    # This request is also performed by a browser, but is not needed for our purposes
-                    print('[*] Received a CAPTCHA challenge from Bluecoat...')
-                    captcha = self.solve_captcha('https://sitereview.bluecoat.com/resource/captcha.jpg', self.session)
-                    if captcha:
-                        b64captcha = base64.urlsafe_b64encode(captcha.encode('utf-8')).decode('utf-8')
-                        # Send CAPTCHA solution via GET since inclusion with the domain categorization request doesn't work anymore
-                        print('[*] Submitting an OCRed CAPTCHA text to Bluecoat...')
-                        captcha_solution_url = 'https://sitereview.bluecoat.com/resource/captcha-request/{0}'.format(b64captcha)
-                        response = self.session.get(url=captcha_solution_url, headers=headers, verify=False)
-                        # Try the categorization request again
-                        response = self.session.post(url, headers=headers, json=postData, verify=False)
-                        response_json = json.loads(response.text)
-                        if 'errorType' in response_json:
-                            print('[!] CAPTCHA submission was apparently incorrect!')
-                            categories = response_json['errorType']
-                        else:
-                            print('[!] CAPTCHA submission was accepted!')
-                            categories = response_json['categorization'][0]['name']
-                    else:
-                        print('[!] Failed to solve BlueCoat CAPTCHA with OCR. Manually solve at: "https://sitereview.bluecoat.com/sitereview.jsp"')
-                else:
-                    print('[!] Failed to solve BlueCoat CAPTCHA with OCR. Manually solve at: "https://sitereview.bluecoat.com/sitereview.jsp"')
-        except Exception as error:
-            print('[!] Bluecoat request failed: {0}'.format(error))
-        return categories
-
-    def solve_captcha(self, url, session):
-        """Solve a Bluecoat CAPTCHA for the provided session."""
-        # Downloads CAPTCHA image and saves to current directory for OCR with Tesseract
-        # Returns CAPTCHA string or False if error occurred
-        jpeg = 'captcha.jpg'
+        barracuda_uri = 'https://www.barracudacentral.org/lookups/lookup-reputation?' + domain
+        PARAMS = {'lookup_entry':domain, 'submit':'Check+Reputation'}
         headers = {'User-Agent':self.useragent}
         try:
-            response = session.get(url=url, headers=headers, verify=False, stream=True)
-            if response.status_code == 200:
-                with open(jpeg, 'wb') as f:
-                    response.raw.decode_content = True
-                    shutil.copyfileobj(response.raw, f)
+            req = self.session.get(barracuda_uri, params=PARAMS, headers=headers)
+            if req.ok:
+                # TODO: Might be best to BS4 for this rather than regex, it's a of a rogue way of finding the category from an HTML dump...
+                res = re.findall("<strong>(.*?)</strong>", req.text)
+                try:
+                    categories.append(res[2])
+                except IndexError:
+                    categories.append('Uncategorised')
             else:
-                print('[!] Failed to download the Bluecoat CAPTCHA.')
-                return False
-            # Perform basic OCR without additional image enhancement
-            text = pytesseract.image_to_string(Image.open(jpeg))
-            text = text.replace(" ", "").replace("[", "l").replace("'", "")
-            # Remove CAPTCHA file
-            try:
-                os.remove(jpeg)
-            except OSError:
-                pass
-            return text
+                print('[!] Barracuda check request failed. Barracuda did not return a 200 response.')
+                print('L.. Request returned status "{}"'.format(req.status_code))
         except Exception as error:
-            print('[!] Error processing the Bluecoat CAPTCHA.'.format(error))
-            return False
-
-    def check_mxtoolbox(self, domain):
-        """Check if the provided domain is blacklisted as spam as determined by MX Toolkit."""
-        issues = []
-        mxtoolbox_url = 'https://mxtoolbox.com/Public/Tools/BrandReputation.aspx'
-        headers = {'User-Agent': self.useragent, 
-                   'Origin': mxtoolbox_url, 
-                   'Referer': mxtoolbox_url}  
-        try:
-            response = self.session.get(url=mxtoolbox_url, headers=headers)
-            soup = BeautifulSoup(response.content, 'lxml')
-            viewstate = soup.select('input[name=__VIEWSTATE]')[0]['value']
-            viewstategenerator = soup.select('input[name=__VIEWSTATEGENERATOR]')[0]['value']
-            eventvalidation = soup.select('input[name=__EVENTVALIDATION]')[0]['value']
-            data = {
-                    '__EVENTTARGET': '', 
-                    '__EVENTARGUMENT': '', 
-                    '__VIEWSTATE': viewstate, 
-                    '__VIEWSTATEGENERATOR': viewstategenerator, 
-                    '__EVENTVALIDATION': eventvalidation, 
-                    'ctl00$ContentPlaceHolder1$brandReputationUrl': domain, 
-                    'ctl00$ContentPlaceHolder1$brandReputationDoLookup': 'Brand Reputation Lookup', 
-                    'ctl00$ucSignIn$hfRegCode': 'missing', 
-                    'ctl00$ucSignIn$hfRedirectSignUp': '/Public/Tools/BrandReputation.aspx', 
-                    'ctl00$ucSignIn$hfRedirectLogin': '', 
-                    'ctl00$ucSignIn$txtEmailAddress': '', 
-                    'ctl00$ucSignIn$cbNewAccount': 'cbNewAccount', 
-                    'ctl00$ucSignIn$txtFullName': '', 
-                    'ctl00$ucSignIn$txtModalNewPassword': '', 
-                    'ctl00$ucSignIn$txtPhone': '', 
-                    'ctl00$ucSignIn$txtCompanyName': '', 
-                    'ctl00$ucSignIn$drpTitle': '', 
-                    'ctl00$ucSignIn$txtTitleName': '', 
-                    'ctl00$ucSignIn$txtModalPassword': ''
-            }
-            response = self.session.post(url=mxtoolbox_url, headers=headers, data=data)
-            soup = BeautifulSoup(response.content, 'lxml')
-            if soup.select('div[id=ctl00_ContentPlaceHolder1_noIssuesFound]'):
-                issues.append('No issues found')
-            else:
-                if soup.select('div[id=ctl00_ContentPlaceHolder1_googleSafeBrowsingIssuesFound]'):
-                    issues.append('Google SafeBrowsing Issues Found.')
-                if soup.select('div[id=ctl00_ContentPlaceHolder1_phishTankIssuesFound]'):
-                    issues.append('PhishTank Issues Found')
-        except Exception as error:
-            print('[!] Error retrieving Google SafeBrowsing and PhishTank reputation!')
-        return issues
-
-    def check_cymon(self, target):
-        """Get reputation data from Cymon.io for target IP address. This returns two dictionaries
-        for domains and security events.
-
-        A Cymon API key is not required, but is recommended.
-        """
-        try:
-            req = self.session.get(url='https://cymon.io/' + target, verify=False)
-            if req.status_code == 200:
-                if 'IP Not Found' in req.text:
-                    return False
-                else:
-                    return True
-            else:
-                return False
-        except Exception:
-            return False
+            print('[!] Barracuda request failed: {}'.format(error))
+        return categories
 
     def check_opendns(self, domain):
         """Check the provided domain's category as determined by the OpenDNS community."""
@@ -371,17 +269,20 @@ class DomainReview(object):
             print('[!] Trend Micro request failed: {0}'.format(error))
         return categories
 
-    def download_malware_domains(self):
-        """Downloads the malwaredomains.com list of malicious domains."""
-        headers = {'User-Agent':self.useragent}
-        response = self.session.get(url=self.malwaredomains_url, headers=headers, verify=False)
-        malware_domains = response.text
-        if response.status_code == 200:
-            return malware_domains
-        else:
-            print('[!] Error reaching: {}, Status: {}'.format(self.malwaredomains_url, response.status_code))
-            return None
-
+    def check_vtip(self, target):
+        url = "https://www.virustotal.com/api/v3/ip_addresses/"+ target
+        headers = {
+            "accept": "application/json",
+            "x-apikey": self.virustotal_api_key
+        }
+        try:
+            response = requests.get(url, headers=headers)
+            attributes = response.json()
+            results = attributes['data']['attributes']['last_analysis_results']
+        except Exception as error:
+            print("[!] VT IP address reputation check failed: {0}".format(error)) 
+        return results
+        
     def check_domain_status(self):
         """Check the status of each domain in the provided list collected from the Domain model.
         Each domain will be checked to ensure the domain is not flagged/blacklisted. A domain
@@ -393,7 +294,6 @@ class DomainReview(object):
 
         """
         lab_results = {}
-        malware_domains = self.download_malware_domains()
         for domain in self.domain_queryset:
             print('[+] Starting update of {}'.format(domain.name))
             burned_dns = False
@@ -410,12 +310,6 @@ class DomainReview(object):
                 burned = True
             if not burned:
                 burned_explanations = []
-                # Check if domain is flagged for malware
-                if malware_domains:
-                    if domain_name in malware_domains:
-                        print('[!] {}: Identified as a known malware domain (malwaredomains.com)!'.format(domain_name))
-                        burned = True
-                        burned_explanations.append('Flagged by malwaredomains.com')
                 # Check domain name with VirusTotal
                 vt_results = self.check_virustotal(domain_name)
                 if 'categories' in vt_results:
@@ -438,9 +332,12 @@ class DomainReview(object):
                         ip_addresses.append({'address':address['ip_address'], 'timestamp':address['last_resolved'].split(' ')[0]})
                 bad_addresses = []
                 for address in ip_addresses:
-                    if self.check_cymon(address['address']):
-                        burned_dns = True
-                        bad_addresses.append(address['address'] + '/' + address['timestamp'])
+                    ip = address['address']
+                    vtip_results = DomainReview.check_vtip(ip)
+                    for key, subkey in vtip_results.items():
+                        if subkey['category'] == "malicious":
+                            burned_dns = True
+                            bad_addresses.append(address['address'] + '/' + address['timestamp'])
                 if burned_dns:
                     print('[*] {}: Identified as pointing to suspect IP addresses (VirusTotal passive DNS).'.format(domain_name))
                     health_dns = 'Flagged DNS ({})'.format(', '.join(bad_addresses))
@@ -451,19 +348,17 @@ class DomainReview(object):
                 domain_categories.extend(xforce_results)
                 talos_results = self.check_talos(domain_name)
                 domain_categories.extend(talos_results)
-                bluecoat_results = self.check_bluecoat(domain_name)
-                domain_categories.extend(bluecoat_results)
+                barracuda_results = self.check_barracuda(domain_name)
+                domain_categories.extend(barracuda_results)
                 fortiguard_results = self.check_fortiguard(domain_name)
                 domain_categories.extend(fortiguard_results)
                 opendns_results = self.check_opendns(domain_name)
                 domain_categories.extend(opendns_results)
                 trendmicro_results = self.check_trendmicro(domain_name)
                 domain_categories.extend(trendmicro_results)
-                mxtoolbox_results = self.check_mxtoolbox(domain_name)
-                domain_categories.extend(domain_categories)
                 # Make categories unique
                 domain_categories = list(set(domain_categories))
-                # Check if any categopries are suspect
+                # Check if any categories are suspect
                 bad_categories = []
                 for category in domain_categories:
                     if category.lower() in self.blacklisted:
@@ -482,8 +377,7 @@ class DomainReview(object):
                 lab_results[domain]['categories']['talos'] = ', '.join(talos_results)
                 lab_results[domain]['categories']['xforce'] = ', '.join(xforce_results)
                 lab_results[domain]['categories']['opendns'] = ', '.join(opendns_results)
-                lab_results[domain]['categories']['bluecoat'] = ', '.join(bluecoat_results)
-                lab_results[domain]['categories']['mxtoolbox'] = ', '.join(mxtoolbox_results)
+                lab_results[domain]['categories']['barracuda'] = ', '.join(barracuda_results)
                 lab_results[domain]['categories']['fortiguard'] = ', '.join(fortiguard_results)
                 lab_results[domain]['categories']['trendmicro'] = ', '.join(trendmicro_results)
                 # Sleep for a while for VirusTotal's API

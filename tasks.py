@@ -119,11 +119,10 @@ def check_domains():
             domain_instance.all_cat = lab_results[domain]['categories']['all']
             domain_instance.talos_cat = lab_results[domain]['categories']['talos']
             domain_instance.opendns_cat = lab_results[domain]['categories']['opendns']
-            domain_instance.bluecoat_cat = lab_results[domain]['categories']['bluecoat']
+            domain_instance.barracuda_cat = lab_results[domain]['categories']['barracuda']
             domain_instance.ibm_xforce_cat = lab_results[domain]['categories']['xforce']
             domain_instance.trendmicro_cat = lab_results[domain]['categories']['trendmicro']
             domain_instance.fortiguard_cat = lab_results[domain]['categories']['fortiguard']
-            domain_instance.mx_toolbox_status = lab_results[domain]['categories']['mxtoolbox']
             domain_instance.save()
         except Exception as error:
             print('[!] Error updating "{}". Error: {}'.format(domain.name, error))

@@ -117,11 +117,11 @@ class Domain(models.Model):
     all_cat = models.TextField('All Categories', help_text='All categories applied to this domain', null=True)
     ibm_xforce_cat = models.CharField('IBM X-Force', max_length=100, help_text='Domain category as determined by IBM X-Force', null=True)
     talos_cat = models.CharField('Cisco Talos', max_length=100, help_text='Domain category as determined by Cisco Talos', null=True)
-    bluecoat_cat =models.CharField('Bluecoat', max_length=100, help_text='Domain category as determined by Bluecoat', null=True)
+    barracuda_cat =models.CharField('Barracuda', max_length=100, help_text='Domain category as determined by Barracuda', null=True)
     fortiguard_cat = models.CharField('Fortiguard', max_length=100, help_text='Domain category as determined by Fortiguard', null=True)
     opendns_cat = models.CharField('OpenDNS', max_length=100, help_text='Domain category as determined by OpenDNS', null=True)
     trendmicro_cat = models.CharField('TrendMicro', max_length=100, help_text='Domain category as determined by TrendMicro', null=True)
-    mx_toolbox_status =  models.CharField('MX Toolbox Status', max_length=100, help_text='Domain spam status as determined by MX Toolbox', null=True)
+    #mx_toolbox_status =  models.CharField('MX Toolbox Status', max_length=100, help_text='Domain spam status as determined by MX Toolbox', null=True)
     note = models.TextField('Notes', help_text='Domain-related notes, such as thoughts behind its purchase or how/why it was burned or retired', null=True)
     burned_explanation = models.TextField('Health Explanation', help_text='Reasons why the domain\'s health status is not "Healthy"', null=True)
     # Foreign Keys
